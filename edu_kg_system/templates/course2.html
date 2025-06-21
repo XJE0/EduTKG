@@ -1,0 +1,319 @@
+{% extends "navigate.html" %}
+{% block mainbody %}
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>学科知识图谱</title>
+    <meta charset="utf-8" />
+    <script src="/static/js/echarts.js"></script>
+    <script src="/static/js/jquery.min.js"></script>
+    <link rel="stylesheet" href="/static/css/footable.core.min.css">
+    <script src="/static/js/footable.min.js"></script>
+</head>
+
+<div class="container">
+    <div class="row">
+        <div class="col-md-12">
+            <h3 class="page-header"><i class="fa fa-share-alt"></i> 知识图谱演化</h3>
+            <ol class="breadcrumb">
+                <li><i class="fa fa-home"></i><a href="/">主页</a></li>
+                <li><i class="fa fa-share-alt"></i> 知识图谱演化</li>
+            </ol>
+        </div>
+
+        <div class="col-md-12">
+            <div class="panel panel-default">
+                <header class="panel-heading">文本查询：</header>
+                <div class="panel-body">
+                    <div class="input-group">
+                        <input type="text" id="user_text" class="form-control" placeholder="输入文本">
+                        <span class="btn btn-primary input-group-addon" id="relationSearchButton"
+                            style="background-color:#4592fe; padding:6px 38px">查询</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 表格和图区域 -->
+        <div id="resultSection" style="display: none;">
+            <div class="col-md-12">
+                <div class="panel panel-default">
+                    <header class="panel-heading">列表：</header>
+                    <div class="panel-body">
+                        <table class="table" data-paging="true" data-sorting="true">
+                            <thead>
+                                <tr>
+                                    <th>源实体</th>
+                                    <th>关系</th>
+                                    <th>目标实体</th>
+                                    <th>操作栏</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-12" id="graphSection" style="display: none;">
+                <div class="panel panel-default">
+                    <header class="panel-heading">关系子图：</header>
+                    <div class="panel-body">
+                        <div id="graph" style="width: 90%; height:100px;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-12" id="graphSection2" style="display: none;">
+                <div class="panel panel-default">
+                    <header class="panel-heading">关系大图：</header>
+                    <div class="panel-body">
+                        <div id="graph2" style="width: 90%; height:500px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    var data = [], links = [], set = new Set();
+
+    document.getElementById('relationSearchButton').addEventListener('click', function () {
+        var userText = document.getElementById('user_text').value.trim();
+        if (userText !== '') {
+            document.getElementById('resultSection').style.display = 'block';
+            addNewRow(); // 默认显示一行
+        }
+    });
+
+    function addNewRow() {
+        var tableBody = document.getElementById('tableBody');
+        var row = document.createElement('tr');
+        row.innerHTML = `
+            <td contenteditable="true">字符串</td>
+            <td contenteditable="true">是</td>
+            <td contenteditable="true">字符数组</td>
+            <td>
+                <button class="btn btn-success addButton">添加</button>
+                <button class="btn btn-danger cancelButton">取消</button>
+            </td>
+        `;
+        tableBody.appendChild(row);
+        $('.table').footable();
+    }
+// 委托事件绑定
+document.getElementById('tableBody').addEventListener('click', function (e) {
+    const target = e.target;
+
+    if (target.classList.contains('addButton')) {
+        const row = target.closest('tr');
+        const td = row.querySelectorAll('td');
+        const source = td[0].innerText.trim();
+        const relation = td[1].innerText.trim();
+        const targetEntity = td[2].innerText.trim();
+
+        if (source && relation && targetEntity) {
+             const url = `/add_course_knowledgepoint?source=${source}&relation=${relation}&target=${targetEntity}`;
+            fetch(url, {
+                method: 'get'
+            }).then(res => {
+                if (res.ok) {
+                    return res.json();  // 解析
+                }
+            }).then(data => {
+        console.log("返回数据：", data);
+
+        if (data.status === 'success') {
+            // 获取数据
+            const entityRelation = data.entityRelation;
+            // 显示图谱区域
+            document.getElementById('graphSection').style.display = 'block';
+            document.getElementById('graphSection2').style.display = 'block';
+            // 更新图谱
+            updateGraph(source, relation, targetEntity);
+            updateGraph2(entityRelation);
+        } else {
+            alert("添加失败: " + data.message);
+        }
+    }).catch(error => {
+        alert("请求出错: " + error.message);
+    });
+        } else {
+        }
+    }
+
+    if (target.classList.contains('cancelButton')) {
+        const row = target.closest('tr');
+        row.remove();
+        document.getElementById('resultSection').style.display = 'none';
+        document.getElementById('graphSection').style.display = 'none';
+        data = [];
+        links = [];
+        set.clear();
+    }
+});
+
+    function updateGraph(source, relation, target) {
+        // 防止重复添加节点
+        if (!set.has(source)) {
+            set.add(source);
+            data.push({
+                name: source,
+                draggable: true,
+                itemStyle: { normal: { color: "#FFA500" } }
+            });
+        }
+        if (!set.has(target)) {
+            set.add(target);
+            data.push({
+                name: target,
+                draggable: true,
+                itemStyle: { normal: { color: "#FFA500" } }
+            });
+        }
+        links.push({
+            source: source,
+            target: target,
+            value: relation,
+            symbolSize: 10,
+            lineStyle: { normal: { color: "#FFA500" } }
+        });
+
+        var myChart = echarts.init(document.getElementById('graph'));
+        var option = {
+            tooltip: {},
+            animationDurationUpdate: 1500,
+            animationEasingUpdate: 'quinticInOut',
+            series: [{
+                type: 'graph',
+                layout: 'force',
+                symbolSize: 45,
+                focusNodeAdjacency: true,
+                roam: true,
+                edgeSymbol: ['none', 'arrow'],
+                force: {
+                    repulsion: 1000
+                },
+                edgeLabel: {
+                    normal: {
+                        show: true,
+                        formatter: '{c}',
+                        textStyle: { fontSize: 10 }
+                    }
+                },
+                label: {
+                    normal: {
+                        show: true,
+                        textStyle: { fontSize: 12 }
+                    }
+                },
+                data: data,
+                links: links,
+                lineStyle: {
+                    normal: {
+                        opacity: 0.9,
+                        width: 1.3,
+                        color: '#262626'
+                    }
+                }
+            }]
+        };
+        myChart.setOption(option);
+    }
+
+function updateGraph2(entityRelation) {
+    var data2 = [];
+    var links2 = [];
+    let set = new Set();
+
+    for (var i = 0; i < entityRelation.length; i++) {
+        let s = entityRelation[i]['source'];
+        let t = entityRelation[i]['target'];
+        let rel_type = entityRelation[i]['rel_type'];
+
+        if (!set.has(s)) {
+            set.add(s);
+            data2.push({
+                name: s,
+                draggable: true
+            });
+        }
+
+        if (!set.has(t)) {
+            set.add(t);
+            data2.push({
+                name: t,
+                draggable: true
+            });
+        }
+
+        links2.push({
+            source: s,
+            target: t,
+            value: rel_type,
+            symbolSize: 10
+        });
+    }
+
+    // 渲染图谱
+    var myChart = echarts.init(document.getElementById('graph2'));
+    var option = {
+        title: { text: '' },
+        tooltip: {},
+        animationDurationUpdate: 1500,
+        animationEasingUpdate: 'quinticInOut',
+        label: {
+            normal: {
+                show: true,
+                textStyle: { fontSize: 12 },
+            }
+        },
+        legend: {
+            x: "center",
+            show: false
+        },
+        series: [{
+            type: 'graph',
+            layout: 'force',
+            symbolSize: 45,
+            focusNodeAdjacency: true,
+            roam: true,
+            edgeSymbol: ['none', 'arrow'],
+            categories: [
+                { name: 'Bank', itemStyle: { normal: { color: "#009800" } } },
+                { name: 'Serise', itemStyle: { normal: { color: "#4592FF" } } },
+                { name: 'Instance', itemStyle: { normal: { color: "#C71585" } } }
+            ],
+            label: {
+                normal: {
+                    show: true,
+                    textStyle: { fontSize: 12 }
+                }
+            },
+            force: { repulsion: 1000 },
+            edgeSymbolSize: [4, 50],
+            edgeLabel: {
+                normal: {
+                    show: true,
+                    textStyle: { fontSize: 10 },
+                    formatter: "{c}"
+                }
+            },
+            data: data2,
+            links: links2,
+            lineStyle: {
+                normal: {
+                    opacity: 0.9,
+                    width: 1.3,
+                    curveness: 0,
+                    color: "#262626"
+                }
+            }
+        }]
+    };
+    myChart.setOption(option);
+}
+
+</script>
+
+{% endblock %}
